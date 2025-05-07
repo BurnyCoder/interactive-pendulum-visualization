@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Pendulum Simulation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: flex-start; /* Align to top to ensure controls are visible */
+            min-height: 100vh; 
+            background-color: #f3f4f6; /* Light gray background */
+            margin: 0; 
+            padding-top: 20px; /* Add some padding at the top */
+            box-sizing: border-box;
+        }
+        canvas { 
+            background-color: #ffffff; /* White canvas background */
+            border-radius: 0.5rem; /* Rounded corners */
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); /* Subtle shadow */
+            display: block; 
+            margin-bottom: 20px; /* Space below canvas */
+        }
+        .controls { 
+            margin-top: 0; /* Removed top margin as body has padding-top */
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 15px; /* Increased gap for better spacing */
+            justify-content: center; 
+            align-items: center; 
+            padding: 15px; /* Increased padding */
+            background-color: #fff; 
+            border-radius: 0.5rem; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05); 
+            width: 90%;
+            max-width: 600px; /* Max width for controls */
+        }
+        .control-group { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            min-width: 120px; /* Minimum width for each control group */
+        }
+        label { 
+            font-size: 0.875rem; /* 14px */
+            color: #4b5563; /* Gray-600 */
+            margin-bottom: 4px; 
+            text-align: center;
+        }
+        input[type="range"] { 
+            width: 120px; 
+            cursor: pointer; 
+        }
+        button { 
+            background-color: #4f46e5; /* Indigo-600 */
+            color: white; 
+            font-weight: 600; 
+            padding: 10px 20px; 
+            border: none; 
+            border-radius: 0.5rem; 
+            cursor: pointer; 
+            transition: background-color 0.3s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button:hover { 
+            background-color: #4338ca; /* Indigo-700 */
+        }
+        #value-display span { 
+            font-weight: bold; 
+            color: #1f2937; /* Gray-800 */
+        }
+        .simulation-title {
+            font-size: 1.75rem; /* Larger title */
+            font-weight: 600;
+            color: #374151; /* Gray-700 */
+            margin-bottom: 20px; /* Space below title */
+        }
+    </style>
+</head>
+<body>
+    <h1 class="simulation-title">Simple Pendulum Simulation</h1>
+    <canvas id="pendulumCanvas"></canvas>
+    <div class="controls">
+        <div class="control-group">
+            <label for="lengthSlider">Length (L): <span id="lengthValue">150</span> px</label>
+            <input type="range" id="lengthSlider" min="50" max="300" value="150">
+        </div>
+        <div class="control-group">
+            <label for="gravitySlider">Gravity (g): <span id="gravityValue">0.5</span></label> <input type="range" id="gravitySlider" min="0.1" max="2" value="0.5" step="0.01">
+        </div>
+        <div class="control-group">
+            <label for="angleSlider">Angle (θ₀): <span id="angleValue">45</span>°</label>
+            <input type="range" id="angleSlider" min="1" max="90" value="45"> </div>
+        <button id="resetButton">Start / Reset Simulation</button>
+    </div>
+
+    <script>
+        // Canvas and Context
+        const canvas = document.getElementById('pendulumCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Sliders and Value Displays
+        const lengthSlider = document.getElementById('lengthSlider');
+        const gravitySlider = document.getElementById('gravitySlider');
+        const angleSlider = document.getElementById('angleSlider');
+        const lengthValueSpan = document.getElementById('lengthValue');
+        const gravityValueSpan = document.getElementById('gravityValue');
+        const angleValueSpan = document.getElementById('angleValue');
+        const resetButton = document.getElementById('resetButton');
+
+        // Pendulum Parameters
+        let L; // Actual length of the pendulum used in simulation (pixels)
+        let g; // Acceleration due to gravity (simulation units)
+        let initialAngleDeg; // Initial angle in degrees
+
+        let angleRad; // Current angle in radians
+        let angularVelocity = 0;
+        let angularAcceleration = 0;
+
+        // Pivot point
+        let pivotX, pivotY;
+
+        // Time step for simulation
+        const dt = 0.1; // Simulation time step, smaller for more accuracy but more computation
+
+        let animationFrameId; // To control the animation loop
+
+        // Function to set canvas dimensions responsively
+        function setCanvasDimensions() {
+            const parentWidth = document.body.clientWidth;
+            let desiredWidth = parentWidth * 0.9; // Use 90% of body width
+            if (parentWidth < 400) desiredWidth = parentWidth * 0.95; // Use more on very small screens
+            
+            canvas.width = Math.min(desiredWidth, 700); // Max width 700px
+            canvas.height = Math.min(canvas.width * 0.7, 500); // Aspect ratio, max height 500px
+
+            pivotX = canvas.width / 2;
+            pivotY = canvas.height * 0.15; // Pivot point near the top
+        }
+
+        // Initialize parameters from sliders and cap L if necessary
+        function initializeParameters() {
+            let requestedL = parseFloat(lengthSlider.value);
+            
+            // Cap L to prevent it from going out of canvas bounds
+            // Max L based on canvas dimensions to ensure it's visible
+            const maxHorizontalL = pivotX * 0.90; // 90% of half-width to avoid edge collision
+            const maxVerticalL = (canvas.height - pivotY) * 0.90; // 90% of height below pivot
+            L = Math.min(requestedL, maxHorizontalL, maxVerticalL);
+            // Ensure L is not smaller than a minimum value (e.g. slider's min)
+            L = Math.max(L, parseFloat(lengthSlider.min));
+
+
+            g = parseFloat(gravitySlider.value);
+            initialAngleDeg = parseFloat(angleSlider.value);
+
+            // Update display spans with actual or chosen values
+            lengthValueSpan.textContent = L.toFixed(0);
+            gravityValueSpan.textContent = g.toFixed(2);
+            angleValueSpan.textContent = initialAngleDeg.toFixed(0);
+
+            // Convert initial angle to radians for physics calculations
+            angleRad = (initialAngleDeg * Math.PI) / 180;
+            angularVelocity = 0; // Reset velocity
+            angularAcceleration = 0; // Reset acceleration
+        }
+
+        // Update pendulum state using Euler-Cromer integration
+        function updatePendulum() {
+            // Calculate angular acceleration: θ'' = -(g/L) * sin(θ)
+            // The division by L is tricky if L is very small.
+            // The simulation 'g' and 'L' are in screen units, so their ratio is important.
+            // Let's scale 'g' to make the simulation feel more natural for typical L values (50-300px)
+            // A 'g' of 0.5 with L=150 gives a reasonable period.
+            // The actual physics uses g in m/s^2 and L in meters. Here, it's pixels.
+            if (L === 0) return; // Prevent division by zero if L somehow becomes 0
+            angularAcceleration = -(g * 10 / L) * Math.sin(angleRad); // Scaled g for visual effect
+
+            // Update angular velocity: ω_new = ω_old + α * dt
+            angularVelocity += angularAcceleration * dt;
+
+            // Apply damping to simulate air resistance and friction
+            angularVelocity *= 0.995; // Small damping factor
+
+            // Update angle: θ_new = θ_old + ω_new * dt
+            angleRad += angularVelocity * dt;
+        }
+
+        // Draw the pendulum on the canvas
+        function drawPendulum() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Calculate bob position based on current angle and length
+            const bobX = pivotX + L * Math.sin(angleRad);
+            const bobY = pivotY + L * Math.cos(angleRad);
+            const bobRadius = Math.max(8, L * 0.07); // Bob radius proportional to length, min 8px
+
+            // Draw pivot point
+            ctx.beginPath();
+            ctx.arc(pivotX, pivotY - bobRadius * 0.3, bobRadius * 0.4, 0, 2 * Math.PI); // Smaller decorative pivot
+            ctx.fillStyle = '#374151'; // Dark gray
+            ctx.fill();
+
+            // Draw pendulum rod
+            ctx.beginPath();
+            ctx.moveTo(pivotX, pivotY);
+            ctx.lineTo(bobX, bobY);
+            ctx.strokeStyle = '#4B5563'; // Gray
+            ctx.lineWidth = Math.max(2, L * 0.015); // Rod thickness proportional to length
+            ctx.stroke();
+
+            // Draw pendulum bob
+            ctx.beginPath();
+            ctx.arc(bobX, bobY, bobRadius, 0, 2 * Math.PI);
+            ctx.fillStyle = '#4f46e5'; // Indigo
+            ctx.fill();
+            
+            // Optional: Draw a faint ground line for reference (visual cue)
+            // const groundY = pivotY + L + bobRadius * 1.5;
+            // if (groundY < canvas.height) {
+            //     ctx.beginPath();
+            //     ctx.moveTo(0, groundY);
+            //     ctx.lineTo(canvas.width, groundY);
+            //     ctx.strokeStyle = '#d1d5db'; // Light gray
+            //     ctx.lineWidth = 1;
+            //     ctx.stroke();
+            // }
+        }
+
+        // Main animation loop
+        function animate() {
+            updatePendulum();
+            drawPendulum();
+            animationFrameId = requestAnimationFrame(animate); // Request next frame
+        }
+
+        // Reset and start/restart simulation
+        function startOrResetSimulation() {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId); // Stop previous animation
+            }
+            setCanvasDimensions(); // Ensure canvas is sized correctly
+            initializeParameters(); // Set parameters based on sliders and canvas
+            drawPendulum(); // Draw initial state
+            animate(); // Start the animation loop
+        }
+
+        // Event Listeners for sliders (update display only)
+        lengthSlider.addEventListener('input', () => {
+            // Display the slider's current value, actual L is set on reset
+            lengthValueSpan.textContent = parseFloat(lengthSlider.value).toFixed(0);
+        });
+        gravitySlider.addEventListener('input', () => {
+            gravityValueSpan.textContent = parseFloat(gravitySlider.value).toFixed(2);
+        });
+        angleSlider.addEventListener('input', () => {
+            angleValueSpan.textContent = parseFloat(angleSlider.value).toFixed(0);
+        });
+        
+        // Event listener for the reset button
+        resetButton.addEventListener('click', startOrResetSimulation);
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            if (animationFrameId) { // If animating, stop it, re-init, and restart
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null; // Clear ID
+                startOrResetSimulation();
+            } else { // If not animating, just re-init and draw static
+                setCanvasDimensions();
+                initializeParameters();
+                drawPendulum();
+            }
+        });
+
+        // Initial setup when the page loads
+        setCanvasDimensions();
+        initializeParameters(); // Initialize with default slider values & capped L
+        drawPendulum(); // Draw the initial static state of the pendulum
+    </script>
+</body>
+</html>
